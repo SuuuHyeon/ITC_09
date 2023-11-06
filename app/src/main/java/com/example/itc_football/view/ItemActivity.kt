@@ -13,6 +13,5 @@ class ItemActivity : AppCompatActivity(){
 
         val view = binding.root
         setContentView(view)
-
     }
 }
