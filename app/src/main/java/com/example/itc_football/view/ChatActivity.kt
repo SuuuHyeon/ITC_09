@@ -1,5 +1,6 @@
 package com.example.itc_football.view
 
+import android.annotation.SuppressLint
 import android.content.ContentValues.TAG
 import android.os.Bundle
 import android.util.Log
@@ -29,12 +30,13 @@ class ChatActivity : AppCompatActivity() {
 
     private val chatList = mutableListOf<Chat>()
 
-    private var userName = ""
+    private var userNickname = ""
 
     private lateinit var firebaseAuth: FirebaseAuth
     private val db = FirebaseFirestore.getInstance()
 
 
+    @SuppressLint("SetTextI18n")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ChatActivityBinding.inflate(layoutInflater)
@@ -46,8 +48,9 @@ class ChatActivity : AppCompatActivity() {
             db.collection("users").document(user.uid).get()
                 .addOnSuccessListener { document ->
                     if (document != null) {
-                        userName = document.data?.get("name").toString()
-                        Log.d(TAG, "userName: $userName")
+                        userNickname = document.data?.get("name").toString()
+                        Log.d(TAG, "userName: $userNickname")
+                        loadChatMessages()
                     } else {
                         Log.d(TAG, "No such document")
                     }
@@ -58,10 +61,9 @@ class ChatActivity : AppCompatActivity() {
         }
 
 
-
         // productID를 받아옴
         val productID = intent.getStringExtra("productID")
-        userName = intent.getStringExtra(USERNAME) ?: ""
+        userNickname = intent.getStringExtra(USERNAME) ?: ""
 
         // productID를 이용하여 스토리지에서 이미지를 다운로드
         val storage = Firebase.storage.reference.child("${productID}.png")
@@ -71,15 +73,12 @@ class ChatActivity : AppCompatActivity() {
 
         binding.productName.text = intent.getStringExtra("productName")
         binding.productPrice.text = "${intent.getIntExtra("productPrice", 0)}원"
-        loadChatMessages()
 
-        if (userName.isEmpty()) {
+        if (userNickname.isEmpty()) {
             finish()
         } else {
             socketHandler = SocketHandler()
-
             chatAdapter = ChatAdapter()
-
             binding.rvChat.apply {
                 layoutManager = LinearLayoutManager(this@ChatActivity)
                 adapter = chatAdapter
@@ -89,7 +88,7 @@ class ChatActivity : AppCompatActivity() {
                 val message = binding.etMsg.text.toString()
                 if (message.isNotEmpty()) {
                     val chat = Chat(
-                        username = userName,
+                        username = userNickname,
                         text = message,
                         timestamp = Timestamp.now()
                     )
@@ -99,7 +98,10 @@ class ChatActivity : AppCompatActivity() {
                         db.collection("product").document(productID).collection("msg")
                             .add(chat)
                             .addOnSuccessListener { documentReference ->
-                                Log.d(TAG, "DocumentSnapshot added with ID: ${documentReference.id}")
+                                Log.d(
+                                    TAG,
+                                    "DocumentSnapshot added with ID: ${documentReference.id}"
+                                )
                             }
                             .addOnFailureListener { e ->
                                 Log.w(TAG, "Error adding document", e)
@@ -113,7 +115,7 @@ class ChatActivity : AppCompatActivity() {
             }
 
             socketHandler.onNewChat.observe(this) {
-                val chat = it.copy(isSelf = it.username == userName)
+                val chat = it.copy(isSelf = it.username == userNickname)
                 chatList.add(chat)
                 chatAdapter.submitChat(chatList)
                 Log.d("ChatList", "$chatList")
@@ -157,7 +159,6 @@ class ChatActivity : AppCompatActivity() {
         })
 
 
-
     }
 
     override fun onDestroy() {
@@ -173,21 +174,29 @@ class ChatActivity : AppCompatActivity() {
         val productID = intent.getStringExtra("productID")
         if (productID != null) {
             db.collection("product").document(productID).collection("msg")
-                .orderBy("timestamp", Query.Direction.ASCENDING)  // Assuming that 'timestamp' field exists in your Chat data class.
+                .orderBy("timestamp", Query.Direction.ASCENDING)
                 .get()
                 .addOnSuccessListener { result ->
+                    val fetchedChatList = mutableListOf<Chat>()
+
                     for (document in result) {
-                        var chat = document.toObject(Chat::class.java)
-                        if (chat.username == userName) {
-                            chat = chat.copy(isSelf = true)
-                        }
-                        chatList.add(chat)
+                        val chat = document.toObject(Chat::class.java)
+                        fetchedChatList.add(chat)
                     }
+
+                    // 여기서 내 채팅인지 여부를 판별하고 isSelf 값을 설정합니다.
+                    fetchedChatList.forEach { chat ->
+                        chat.isSelf = chat.username == userNickname
+                    }
+
+                    // 기존 채팅 리스트를 업데이트하고 UI를 갱신합니다.
+                    chatList.clear()
+                    chatList.addAll(fetchedChatList)
                     chatAdapter.submitChat(chatList)
                     binding.rvChat.scrollToPosition(chatList.size - 1)
                 }
                 .addOnFailureListener { exception ->
-                    Log.w(TAG, "Error getting documents.", exception)
+                    Log.w(TAG, "문서 가져오기 실패.", exception)
                 }
         }
     }
