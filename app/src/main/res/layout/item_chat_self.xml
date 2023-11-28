@@ -32,6 +32,7 @@
                 android:layout_height="wrap_content"
                 android:textColor="@color/black"
                 android:textStyle="bold"
+                android:textSize="16dp"
                 tools:text="Ravstatic" />
 
         </LinearLayout>
@@ -51,7 +52,9 @@
                 android:id="@+id/msg"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:layout_gravity="center_vertical"
                 android:textColor="@color/black"
+                android:textSize="15dp"
                 tools:text="Ravstatic" />
 
         </LinearLayout>
