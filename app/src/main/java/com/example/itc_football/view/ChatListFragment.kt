@@ -17,9 +17,11 @@ import com.example.itc_football.viewmodel.MyChatAdapter
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
-import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.tasks.await
 
 class ChatListFragment : Fragment() {
@@ -35,7 +37,7 @@ class ChatListFragment : Fragment() {
         inflater: LayoutInflater,
         container: ViewGroup?,
         savedInstanceState: Bundle?
-    ): View? {
+    ): View {
         binding = ChatListFragmentBinding.inflate(inflater, container, false)
         val view = binding.root
 
@@ -45,17 +47,14 @@ class ChatListFragment : Fragment() {
 
         // 새로고침
         mysrl = binding.swipeLayout
-        mysrl!!.setOnRefreshListener(SwipeRefreshLayout.OnRefreshListener {
-//            newProductList.clear()
-//            getChatData()
-//            mysrl!!.isRefreshing = false
+        mysrl!!.setOnRefreshListener {
             refreshData()
-        })
+        }
 
-        if (!isDataLoaded) {
-            // 데이터를 가져오기
+        runBlocking {
             getChatData()
         }
+
 
         // 어댑터를 생성하고 리사이클러뷰에 연결
         val adapter = MyChatAdapter(newProductList)
@@ -85,10 +84,10 @@ class ChatListFragment : Fragment() {
         mysrl!!.isRefreshing = false
     }
 
+    @OptIn(DelicateCoroutinesApi::class)
     @SuppressLint("NotifyDataSetChanged")
     private fun getChatData() {
-        // Firestore에서 데이터 가져오기
-        CoroutineScope(Dispatchers.IO).launch {
+        GlobalScope.launch(Dispatchers.IO) {
             try {
                 val currentUserUid = FirebaseAuth.getInstance().currentUser?.uid
                 val tempProductList = mutableListOf<MyChat>()
@@ -108,24 +107,25 @@ class ChatListFragment : Fragment() {
                             if (orignPname != null && orignPname.length > 7) { // 만약 길이가 7을 초과한다면
                                 productName += ".." // ".." 추가하기
                             }
-                            val splitName  = productDocument.getString("maker")?.split("_")
+                            val splitName = productDocument.getString("maker")?.split("_")
                             val userName = splitName?.get(1)
                             var lastTalk: String?
                             val msgCollection = productDocument.reference.collection("msg")
-                            val lastMsgDocSnapshots = msgCollection.orderBy("timestamp", Query.Direction.DESCENDING)
-                                .limit(1).get().await()
+                            val lastMsgDocSnapshots =
+                                msgCollection.orderBy("timestamp", Query.Direction.DESCENDING)
+                                    .limit(1).get().await()
 
-                            if (!lastMsgDocSnapshots.isEmpty) {
-                                lastTalk= lastMsgDocSnapshots.documents[0].getString("text")
+                            lastTalk = if (!lastMsgDocSnapshots.isEmpty) {
+                                lastMsgDocSnapshots.documents[0].getString("text")
                             } else {
-                                lastTalk= "아직 채팅이 시작되지 않았습니다"
+                                "아직 채팅이 시작되지 않았습니다"
                             }
                             val maxMember = productDocument.getLong("maxMember")?.toInt() ?: 0
                             val nowMember = productDocument.getLong("nowMember")?.toInt() ?: 0
                             val productID = productDocument.getString("productID")
                             val productPrice = productDocument.getLong("productPrice")?.toInt() ?: 0
 
-                            if (productName != null && userName != null && lastTalk != null && productID != null) {
+                            if (userName != null && lastTalk != null && productID != null) {
                                 val product = MyChat(
                                     productName,
                                     userName,
@@ -145,7 +145,7 @@ class ChatListFragment : Fragment() {
                     activity?.runOnUiThread {
                         newProductList.clear()
                         newProductList.addAll(tempProductList) // 기존 리스트를 새로운 리스트로 교체
-                        newRecyclerView.adapter!!.notifyDataSetChanged()
+                        newRecyclerView.adapter?.notifyDataSetChanged()
                     }
                     isDataLoaded = true
                 } else {

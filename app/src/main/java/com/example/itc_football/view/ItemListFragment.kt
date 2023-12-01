@@ -3,19 +3,24 @@ package com.example.itc_football.view
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.os.Bundle
-import androidx.fragment.app.Fragment
+import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import com.example.itc_football.data.Product
-import com.example.itc_football.viewmodel.ProductAdapter
 import com.example.itc_football.databinding.ItemListFragmentBinding
+import com.example.itc_football.viewmodel.ProductAdapter
+import com.example.itc_football.viewmodel.ShimmerAdapter
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
@@ -28,11 +33,13 @@ class ItemListFragment : Fragment() {
     private var hasLoadedData = false
 
     private var newProductList = arrayListOf<Product>()
+    private lateinit var shimmerAdapter: ShimmerAdapter
+
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?,
         savedInstanceState: Bundle?
-    ): View? {
+    ): View {
         _binding = ItemListFragmentBinding.inflate(inflater, container, false)
         val view = binding.root
 
@@ -52,28 +59,93 @@ class ItemListFragment : Fragment() {
         }
 
         if (!hasLoadedData) {
-            // 데이터를 가져오는 함수 호출
+            shimmerAdapter = ShimmerAdapter(10)  // Use an arbitrary number for the item count.
+            newRecyclerView.adapter = shimmerAdapter
             getProductData()
+        } else {
+            setUpRealData(newProductList)
         }
 
-        // 어댑터를 생성하고 리사이클러뷰에 연결
-        val adapter = ProductAdapter(newProductList)
+        return view
+    }
+
+    private fun setUpRealData(productList: ArrayList<Product>) {
+        val adapter = ProductAdapter(productList)
+
         newRecyclerView.adapter = adapter
+
         adapter.setOnItemClickListener(object : ProductAdapter.OnItemClickListener {
+
+            //product 컬렉션 안 member 컬렉션 안에 현재 사용자의 uid가 있는지 확인 후 같으면 실행
             override fun onItemClick(position: Int) {
-                val intent = Intent(context, PreviewActivity::class.java)
+                val productID = newProductList[position].productID
+                val currentUserUid = FirebaseAuth.getInstance().currentUser?.uid
 
-                intent.putExtra("productID", newProductList[position].productID)
-                intent.putExtra("productName", newProductList[position].productName)
-                intent.putExtra("productDetail", newProductList[position].productDetail)
-                intent.putExtra("productPrice", newProductList[position].productPrice)
+                // Firestore 인스턴스 생성
+                val firestore = FirebaseFirestore.getInstance()
 
-                intent.putExtra("maxMember", newProductList[position].maxMember)
-                intent.putExtra("nowMember", newProductList[position].nowMember)
-                startActivity(intent)
+                // 파이어스토어에서 member 컬렉션 조회
+                CoroutineScope(Dispatchers.IO).launch {
+                    try {
+                        val productDocument = firestore.collection("product").document(productID)
+                        val memberSnapshot =
+                            productDocument.collection("member").whereEqualTo("uid", currentUserUid)
+                                .get().await()
+
+                        // 현재 사용자의 uid가 member 컬렉션에 있다면 ChatActivity로 이동, 없다면 PreviewActivity로 이동
+                        activity?.runOnUiThread {
+                            if (!memberSnapshot.isEmpty) {
+                                val intent = Intent(requireContext(), ChatActivity::class.java)
+                                val user = FirebaseAuth.getInstance().currentUser
+                                val email = user?.email ?: ""
+
+                                intent.putExtra(ChatActivity.USERNAME, email)
+                                intent.putExtra("productID", newProductList[position].productID)
+                                intent.putExtra("productName", newProductList[position].productName)
+                                intent.putExtra(
+                                    "productPrice",
+                                    newProductList[position].productPrice
+                                )
+                                intent.putExtra("maxMember", newProductList[position].maxMember)
+                                intent.putExtra("nowMember", newProductList[position].nowMember)
+                                startActivity(intent)
+                            } else {
+                                val previewIntent = Intent(context, PreviewActivity::class.java)
+                                previewIntent.putExtra(
+                                    "productID",
+                                    newProductList[position].productID
+                                )
+                                previewIntent.putExtra(
+                                    "productName",
+                                    newProductList[position].productName
+                                )
+                                previewIntent.putExtra(
+                                    "productDetail",
+                                    newProductList[position].productDetail
+                                )
+                                previewIntent.putExtra(
+                                    "productPrice",
+                                    newProductList[position].productPrice
+                                )
+
+                                previewIntent.putExtra(
+                                    "maxMember",
+                                    newProductList[position].maxMember
+                                )
+                                previewIntent.putExtra(
+                                    "nowMember",
+                                    newProductList[position].nowMember
+                                )
+                                startActivity(previewIntent)
+                            }
+                        }
+                    } catch (e: Exception) {
+                        // 오류 처리
+                        e.printStackTrace()
+                    }
+                }
             }
         })
-            return view
     }
 
     @SuppressLint("NotifyDataSetChanged")
@@ -83,8 +155,9 @@ class ItemListFragment : Fragment() {
     }
 
     @SuppressLint("NotifyDataSetChanged")
+    @OptIn(DelicateCoroutinesApi::class)
     private fun getProductData() {
-        CoroutineScope(Dispatchers.IO).launch {
+        GlobalScope.launch(Dispatchers.IO) {
             try {
                 val querySnapshot = firestore.collection("product").get().await()
                 val tempProductList = mutableListOf<Product>()
@@ -96,32 +169,39 @@ class ItemListFragment : Fragment() {
                     val maxMember = document.getLong("maxMember")?.toInt() ?: 0
                     val nowMember = document.getLong("nowMember")?.toInt() ?: 0
                     val productID = document.getString("productID")
+                    val roomAble = document.getString("roomAble")
 
-                    if (productName != null && productDetail != null && productPrice != null && productID != null) {
+                    if (productName != null && productDetail != null && productPrice != null && productID != null && roomAble != "공구완료") {
                         val product = Product(
                             productName,
                             productDetail,
                             productPrice.toInt(),
                             maxMember,
                             nowMember,
-                            productID
+                            productID,
+                            roomAble.toString()
+
                         )
                         tempProductList.add(product)
                     }
                 }
 
-
                 activity?.runOnUiThread {
                     newProductList.clear()
                     newProductList.addAll(tempProductList)
                     newRecyclerView.adapter?.notifyDataSetChanged()
+                    setUpRealData(newProductList)
                 }
                 hasLoadedData = true
             } catch (e: Exception) {
-                // 오류 처리
                 e.printStackTrace()
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        refreshData()
     }
 
     override fun onDestroyView() {
